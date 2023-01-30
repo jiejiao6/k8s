@@ -1,0 +1,134 @@
+
+#Kubernetes 1.22 部署
+
+# 系统版本 CentOS Linux release 7.9.2009 (Core) x64
+# 内核版本 Linux dashuju01 3.10.0-1160.el7.x86_64 #1 SMP Mon Oct 19 16:18:59 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
+
+# 系统版本 Anolis OS release 7.9 x64
+# 内核版本 Linux k8s01.fengyue.com 3.10.0-1160.an7.x86_64 #1 SMP Thu Oct 14 16:04:36 CST 2021 x86_64 x86_64 x86_64 GNU/Linux
+
+
+
+172.168.150.1 k8s01.fengyue.com  （master）
+172.168.150.2 k8s02.fengyue.com  （node）
+172.168.150.3 k8s03.fengyue.com  （node）
+172.168.150.4 k8s04.fengyue.com  （node）
+172.168.150.5 k8s05.fengyue.com  （node）
+
+
+1.各节点解析
+
+[root@k8s01 ~]# cat /etc/hosts
+172.168.150.1 k8s01.fengyue.com
+172.168.150.2 k8s02.fengyue.com
+172.168.150.3 k8s03.fengyue.com
+172.168.150.4 k8s04.fengyue.com
+172.168.150.5 k8s05.fengyue.com
+172.168.150.6 k8s06.fengyue.com
+
+# k8s01到k8s05 /etc/hosts 均需要添加
+
+2.设置主机名
+
+[root@k8s01 ~]# cat /etc/hostname 
+k8s01.fengyueaorui.com
+[root@k8s02 ~]# cat /etc/hostname
+k8s02.fengyueaorui.com
+
+k8s01到k8s05 均需要设置hostname
+
+
+
+1.关闭防火墙，selinux
+
+systemctl stop firewalld
+systemctl disable firewalld
+sed -i 's/enforcing/disabled/' /etc/selinux/config
+setenforce 0
+
+
+
+2.关闭swap
+
+swapoff -a
+sed -ri 's/.*swap.*/#&/' /etc/fstab
+free -m
+
+
+
+
+3.启用IPv4模块
+
+cat > /etc/sysctl.d/k8s.conf << EOF
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward=1
+vm.swappiness = 0
+EOF
+sysctl --system
+
+
+
+
+4.#时间同步
+
+
+yum install ntpdate -y
+ntpdate time.windows.com
+
+5.装docker
+
+yum install -y yum-utils device-mapper-persistent-data lvm2
+yum-config-manager --add-repo http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+
+6.安装并启动 docker
+
+yum install -y docker-ce docker-ce-cli containerd.io
+systemctl enable docker
+systemctl start docker
+
+7.安装kubeadm，kubelet和kubectl
+
+安装k8s 1.22.2
+yum install -y kubectl-1.22.2 kubelet-1.22.2 kubeadm-1.22.2
+
+systemctl enable kubelet
+
+
+Docker是用yum安装的，docker的cgroup驱动程序默认设置为system。默认情况下Kubernetes cgroup为systemd，我们需要更改Docker cgroup驱动，
+
+vim /etc/docker/daemon.json
+
+{
+  "exec-opts": ["native.cgroupdriver=systemd"]
+}
+
+
+# 重启docker
+
+systemctl restart docker
+
+kubeadm reset
+rm -rf /root/.kube
+rm -rf /etc/cni/net.d
+
+
+在k8s-Master01上执行
+kubeadm init \
+--apiserver-advertise-address=172.168.150.1 \
+--image-repository registry.aliyuncs.com/google_containers \
+--kubernetes-version v1.22.2 \
+--service-cidr=10.96.0.0/12 \
+--pod-network-cidr=10.244.0.0/16 \
+--ignore-preflight-errors=all
+
+
+下面的操作只需要在master节点上执行即可
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+下面的操作只需要在node节点上执行即可
+
+kubeadm join 172.168.150.1:6443 --token lh01vb.d7fbny3aj5nbmn2r \
+	--discovery-token-ca-cert-hash sha256:871cd7e355897cc04b206e201bbd75664d28982c807197cafd95f9412843a3ab 
