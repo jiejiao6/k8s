@@ -1,0 +1,55 @@
+[root@k8s01 ~]# kubectl get node
+NAME                     STATUS   ROLES                  AGE   VERSION
+k8s01.fengyueaorui.com   Ready    control-plane,master   53d   v1.22.2
+k8s02.fengyueaorui.com   Ready    <none>                 53d   v1.22.2
+k8s03.fengyueaorui.com   Ready    <none>                 53d   v1.22.2
+k8s04.fengyueaorui.com   Ready    <none>                 53d   v1.22.2
+k8s05.fengyueaorui.com   Ready    <none>                 53d   v1.22.2
+
+
+[root@k8s01 ~]# kubectl cordon k8s05.fengyueaorui.com 
+node/k8s05.fengyueaorui.com cordoned
+[root@k8s01 ~]# kubectl get node
+NAME                     STATUS                     ROLES                  AGE   VERSION
+k8s01.fengyueaorui.com   Ready                      control-plane,master   53d   v1.22.2
+k8s02.fengyueaorui.com   Ready                      <none>                 53d   v1.22.2
+k8s03.fengyueaorui.com   Ready                      <none>                 53d   v1.22.2
+k8s04.fengyueaorui.com   Ready                      <none>                 53d   v1.22.2
+k8s05.fengyueaorui.com   Ready,SchedulingDisabled   <none>                 53d   v1.22.2
+
+[root@k8s01 ~]#  kubectl drain k8s05.fengyueaorui.com --delete-local-data --ignore-daemonsets --force
+Flag --delete-local-data has been deprecated, This option is deprecated and will be deleted. Use --delete-emptydir-data.
+node/k8s05.fengyueaorui.com already cordoned
+WARNING: ignoring DaemonSet-managed Pods: kube-system/calico-node-9s9mg, kube-system/kube-proxy-nqf85
+evicting pod dev/nginx-5bdb994596-wm2v6
+evicting pod dev/nginx-5bdb994596-7nltb
+pod/nginx-5bdb994596-7nltb evicted
+pod/nginx-5bdb994596-wm2v6 evicted
+node/k8s05.fengyueaorui.com evicted
+[root@k8s01 ~]# kubectl delete node k8s05.fengyueaorui.com
+node "k8s05.fengyueaorui.com" deleted
+[root@k8s01 ~]# kubectl get node
+NAME                     STATUS   ROLES                  AGE   VERSION
+k8s01.fengyueaorui.com   Ready    control-plane,master   53d   v1.22.2
+k8s02.fengyueaorui.com   Ready    <none>                 53d   v1.22.2
+k8s03.fengyueaorui.com   Ready    <none>                 53d   v1.22.2
+k8s04.fengyueaorui.com   Ready    <none>                 53d   v1.22.2
+
+
+kubectl delete all --all 删除所有pod
+
+
+kubectl get pod --all-namespaces
+
+kubectl delete -f  tomcat-nginx.yaml
+
+kubectl create -f  tomcat-nginx.yaml
+
+kubectl get svc -n dev
+
+
+kubectl delete -f  nginx-ingress.yaml
+kubectl create -f  nginx-ingress.yaml
+
+
+ wget https://raw.githubusercontent.com/dotNetCloudNative/eShopOnDapr/main/deploy/k8s/nginx-ingress.yaml
