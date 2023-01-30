@@ -1,0 +1,202 @@
+Kubernetes 暴露服务的有三种方式，分别为 LoadBlancer Service、NodePort Service、Ingress。官网对 Ingress 的定义为管理对外服务到集群内服务之间规则的集合，通俗点讲就是它定义规则来允许进入集群的请求被转发到集群中对应服务上，从来实现服务暴漏。 Ingress 能把集群内 Service 配置成外网能够访问的 URL，流量负载均衡，终止SSL，提供基于域名访问的虚拟主机等等。
+
+1）LoadBlancer Service
+LoadBlancer Service 是 Kubernetes 结合云平台的组件，如国外 GCE、AWS、国内阿里云等等，使用它向使用的底层云平台申请创建负载均衡器来实现，有局限性，对于使用云平台的集群比较方便。
+
+2）NodePort Service
+NodePort Service 是通过在节点上暴漏端口，然后通过将端口映射到具体某个服务上来实现服务暴漏，比较直观方便，但是对于集群来说，随着 Service 的不断增加，需要的端口越来越多，很容易出现端口冲突，而且不容易管理。当然对于小规模的集群服务，还是比较不错的。
+
+3）Ingress
+Ingress 使用开源的反向代理负载均衡器来实现对外暴漏服务，比如 Nginx、Apache、Haproxy等。Nginx Ingress 一般有三个组件组成：
+
+
+ingress是kubernetes的一个资源对象，用于编写定义规则。
+反向代理负载均衡器，通常以Service的Port方式运行，接收并按照ingress定义的规则进行转发，通常为nginx，haproxy，traefik等，本文使用nginx。
+ingress-controller，监听apiserver，获取服务新增，删除等变化，并结合ingress规则动态更新到反向代理负载均衡器上，并重载配置使其生效。
+
+
+
+k8s 版本                 v1.22.2 
+系统                     Anolis OS 7.9
+内核版本                 3.10.0-1160.an7.x86_64
+docker  版本             20.10.21
+ingress-nginx   版本     v1.4.0
+
+ingress-nginx v1.4.0 支持 k8s 1.25, 1.24, 1.23, 1.22 详见
+https://github.com/kubernetes/ingress-nginx
+
+具体系统 信息
+单master , 4个node
+配置均为 4核心 8G内存 100G 硬盘 使用Vmware esxi 虚拟化 
+
+具体情况
+[root@k8s01 1]# kubectl get node -o wide
+NAME                     STATUS   ROLES                  AGE   VERSION   INTERNAL-IP     EXTERNAL-IP   OS-IMAGE        KERNEL-VERSION           CONTAINER-RUNTIME
+k8s01.fengyue.com   Ready    control-plane,master   54d   v1.22.2   172.168.150.1   <none>        Anolis OS 7.9   3.10.0-1160.an7.x86_64   docker://20.10.21
+k8s02.fengyue.com   Ready    <none>                 54d   v1.22.2   172.168.150.2   <none>        Anolis OS 7.9   3.10.0-1160.an7.x86_64   docker://20.10.21
+k8s03.fengyue.com   Ready    <none>                 54d   v1.22.2   172.168.150.3   <none>        Anolis OS 7.9   3.10.0-1160.an7.x86_64   docker://20.10.21
+k8s04.fengyue.com   Ready    <none>                 54d   v1.22.2   172.168.150.4   <none>        Anolis OS 7.9   3.10.0-1160.an7.x86_64   docker://20.10.21
+k8s05.fengyue.com   Ready    <none>                 21h   v1.22.2   172.168.150.5   <none>        Anolis OS 7.9   3.10.0-1160.an7.x86_64   docker://20.10.21
+
+
+
+k8s 1.22 版本需要nginx-ingress 1.4.0 版本
+
+我们使用nginx控制器，其官网给出的配置方法如下： https://kubernetes.github.io/ingress-nginx/deploy/
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.4.0/deploy/static/provider/cloud/deploy.yaml 
+
+但是官方给出的yaml文件中拉取的镜像不在docker hub中，在registry.k8s.io 中，所以在国内我们拉取就会报错：ErrImagePull
+
+解决方法很简单，用国内好心人搬运到docker hub上的仓库代替 https://hub.docker.com/u/anjia0532 ，仓库地址是 ：https://github.com/anjia0532/gcr.io_mirror，
+
+所以，v1.4.0 版本的修改过的镜像的完整yaml文件如下： https://github.com/dotNetCloudNative/eShopOnDapr/blob/main/deploy/k8s/nginx-ingress.yaml 
+
+
+
+
+每次部署 ingres-nginx 都随机一个 nodePort ，而使用 ingres-nginx 访问的时候也要以 域名:端口 的形式去访问，如何直接使用域名 80端口去访问呢？ 直接使用hostNetwork 和 nodeport 的安装方式。
+
+[root@k8s01 ~]# wget https://raw.githubusercontent.com/dotNetCloudNative/eShopOnDapr/main/deploy/k8s/nginx-ingress.yaml
+
+1.使用 hostNetwork
+默认 ingress-nginx 随机提供 nodeport 端口，开启 hostNetwork 启用80、443端口。
+修改 Deployment 下面的 spec
+参数如下：
+hostNetwork: true # 新增 大约在431行 新增
+
+2. 修改381行 type: LoadBalancer 为 type: NodePort
+
+3. 修改负载均衡问题
+
+把 kind: Deployment 改为 kind: DaemonSet 模式，这样每台 node 上都有 ingress-nginx-controller pod 副本。
+参数如下：
+kind: Deployment # 注释
+kind: DaemonSet # 新增
+
+4.部署
+[root@k8s01 1]# kubectl apply -f HostNetwork-nodeport-nginx-ingress.yaml 
+
+5.检查 ingress
+
+[root@k8s01 ~]# kubectl get po -n ingress-nginx -o wide
+NAME                                      READY   STATUS      RESTARTS   AGE   IP               NODE                     NOMINATED NODE   READINESS GATES
+ingress-nginx-admission-create--1-m8lqb   0/1     Completed   0          12h   10.244.146.214   k8s05.fengyue.com   <none>           <none>
+ingress-nginx-admission-patch--1-glw6p    0/1     Completed   0          12h   10.244.209.28    k8s04.fengyue.com   <none>           <none>
+ingress-nginx-controller-2kzbg            1/1     Running     0          12h   172.168.150.3    k8s03.fengyue.com   <none>           <none>
+ingress-nginx-controller-488lm            1/1     Running     0          12h   172.168.150.4    k8s04.fengyue.com   <none>           <none>
+ingress-nginx-controller-knhqd            1/1     Running     0          12h   172.168.150.5    k8s05.fengyue.com   <none>           <none>
+ingress-nginx-controller-m2kjh            1/1     Running     0          12h   172.168.150.2    k8s02.fengyue.com   <none>           <none>
+
+发现除了master节点，其它node节点都有一个副本。
+
+6.在其它节点上查看node
+[root@k8s02 ~]# netstat  -pntl |grep :80
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      4291/nginx: worker  
+tcp6       0      0 :::80                   :::*                    LISTEN      4288/nginx: worker  
+[root@k8s02 ~]# netstat  -pntl |grep :443
+tcp        0      0 0.0.0.0:443             0.0.0.0:*               LISTEN      4291/nginx: worker  
+tcp6       0      0 :::443                  :::*                    LISTEN      4288/nginx: worker  
+其它node节点上已经启用了 80和443
+
+7.查看 ingress-nginx svc
+
+[root@k8s01 ~]# kubectl get svc -n ingress-nginx 
+NAME                                 TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+ingress-nginx-controller             NodePort    10.97.23.124     <none>        80:30117/TCP,443:30368/TCP   12h
+ingress-nginx-controller-admission   ClusterIP   10.104.235.124   <none>        443/TCP                      12h
+
+
+
+8. 创建一个简单的 svc
+
+[root@k8s01 1]# cat my-nginx.yaml 
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-nginx
+spec:
+  selector:
+    matchLabels:
+      app: my-nginx
+  template:
+    metadata:
+      labels:
+        app: my-nginx
+    spec:
+      containers:
+      - name: my-nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-nginx
+  labels:
+    app: my-nginx
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: my-nginx
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-nginx
+  namespace: default
+spec:
+  ingressClassName: nginx  # 使用 nginx 的 IngressClass（关联的 ingress-nginx 控制器）
+  rules:
+  - host: www.fengyue.com  # 将域名映射到 my-nginx 服务
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:  # 将所有请求发送到 my-nginx 服务的 80 端口
+            name: my-nginx
+            port:
+              number: 80
+
+
+[root@k8s01 1]# kubectl apply -f  my-nginx.yaml 
+
+10.访问测试
+访问之前记得加hosts 到任意node节点
+
+[root@k8s01 ~]# cat /etc/hosts
+127.0.0.1   localhost  localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+172.168.150.2 www.fengyue.com
+
+
+[root@k8s01 1]# curl www.fengyue.com
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+html { color-scheme: light dark; }
+body { width: 35em; margin: 0 auto;
+font-family: Tahoma, Verdana, Arial, sans-serif; }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+
