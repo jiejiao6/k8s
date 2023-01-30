@@ -57,6 +57,10 @@ kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/cont
 
 每次部署 ingres-nginx 都随机一个 nodePort ，而使用 ingres-nginx 访问的时候也要以 域名:端口 的形式去访问，如何直接使用域名 80端口去访问呢？ 直接使用hostNetwork 和 nodeport 的安装方式。
 
+其中
+HostNetwork-nodeport-nginx-ingress.yaml为修改后的
+k8s 1.22-nginx-ingress-1.4.yaml为原始的nginx-ingress.yaml
+
 [root@k8s01 ~]# wget https://raw.githubusercontent.com/dotNetCloudNative/eShopOnDapr/main/deploy/k8s/nginx-ingress.yaml
 
 1.使用 hostNetwork
