@@ -10,6 +10,10 @@ NodePort Service 是通过在节点上暴漏端口，然后通过将端口映射
 Ingress 使用开源的反向代理负载均衡器来实现对外暴漏服务，比如 Nginx、Apache、Haproxy等。Nginx Ingress 一般有三个组件组成：
 
 
+ingress是kubernetes的一个资源对象，用于编写定义规则。
+反向代理负载均衡器，通常以Service的Port方式运行，接收并按照ingress定义的规则进行转发，通常为nginx，haproxy，traefik等，本文使用nginx。
+ingress-controller，监听apiserver，获取服务新增，删除等变化，并结合ingress规则动态更新到反向代理负载均衡器上，并重载配置使其生效。
+
 
 [root@k8s01 ~]# kubectl get node
 NAME                     STATUS   ROLES                  AGE   VERSION
@@ -18,6 +22,14 @@ k8s02.fengyueaorui.com   Ready    <none>                 53d   v1.22.2
 k8s03.fengyueaorui.com   Ready    <none>                 53d   v1.22.2
 k8s04.fengyueaorui.com   Ready    <none>                 53d   v1.22.2
 k8s05.fengyueaorui.com   Ready    <none>                 53d   v1.22.2
+
+[root@k8s01 1]# kubectl get node -o wide
+NAME                     STATUS   ROLES                  AGE   VERSION   INTERNAL-IP     EXTERNAL-IP   OS-IMAGE        KERNEL-VERSION           CONTAINER-RUNTIME
+k8s01.fengyueaorui.com   Ready    control-plane,master   54d   v1.22.2   172.168.150.1   <none>        Anolis OS 7.9   3.10.0-1160.an7.x86_64   docker://20.10.21
+k8s02.fengyueaorui.com   Ready    <none>                 54d   v1.22.2   172.168.150.2   <none>        Anolis OS 7.9   3.10.0-1160.an7.x86_64   docker://20.10.21
+k8s03.fengyueaorui.com   Ready    <none>                 54d   v1.22.2   172.168.150.3   <none>        Anolis OS 7.9   3.10.0-1160.an7.x86_64   docker://20.10.21
+k8s04.fengyueaorui.com   Ready    <none>                 54d   v1.22.2   172.168.150.4   <none>        Anolis OS 7.9   3.10.0-1160.an7.x86_64   docker://20.10.21
+k8s05.fengyueaorui.com   Ready    <none>                 21h   v1.22.2   172.168.150.5   <none>        Anolis OS 7.9   3.10.0-1160.an7.x86_64   docker://20.10.21
 
 
 [root@k8s01 ~]# kubectl cordon k8s05.fengyueaorui.com 
@@ -66,3 +78,132 @@ kubectl create -f  nginx-ingress.yaml
 
 
  wget https://raw.githubusercontent.com/dotNetCloudNative/eShopOnDapr/main/deploy/k8s/nginx-ingress.yaml
+
+
+
+每次部署 ingres-nginx 都随机一个 nodePort ，而使用 ingres-nginx 访问的时候也要以 域名:端口 的形式去访问，如何直接使用域名去访问呢？下面介绍另外一种安装方式。
+1.使用 hostNetwork
+默认 ingress-nginx 随机提供 nodeport 端口，开启 hostNetwork 启用80、443端口。
+修改 Deployment 下面的 spec
+参数如下：
+hostNetwork: true # 新增
+
+2、修改负载均衡问题
+把 kind: Deployment 改为 kind: DaemonSet 模式，这样每台 node 上都有 ingress-nginx-controller pod 副本。
+参数如下：
+kind: Deployment # 注释
+kind: DaemonSet # 新增
+
+部署检查 ingress
+[root@k8s01 1]# kubectl apply -f HostNetwork-nodeport-nginx-ingress.yaml 
+
+发现除了master节点，其它node节点都有一个副本。
+[root@k8s01 1]# kubectl get po -n ingress-nginx -owide
+NAME                                      READY   STATUS      RESTARTS   AGE   IP               NODE                     NOMINATED NODE   READINESS GATES
+ingress-nginx-admission-create--1-m8lqb   0/1     Completed   0          11h   10.244.146.214   k8s05.fengyueaorui.com   <none>           <none>
+ingress-nginx-admission-patch--1-glw6p    0/1     Completed   0          11h   10.244.209.28    k8s04.fengyueaorui.com   <none>           <none>
+ingress-nginx-controller-2kzbg            1/1     Running     0          11h   172.168.150.3    k8s03.fengyueaorui.com   <none>           <none>
+ingress-nginx-controller-488lm            1/1     Running     0          11h   172.168.150.4    k8s04.fengyueaorui.com   <none>           <none>
+ingress-nginx-controller-knhqd            1/1     Running     0          11h   172.168.150.5    k8s05.fengyueaorui.com   <none>           <none>
+ingress-nginx-controller-m2kjh            1/1     Running     0          11h   172.168.150.2    k8s02.fengyueaorui.com   <none>           <none>
+
+在其它节点上查看node
+[root@k8s02 ~]# netstat  -pntl |grep :80
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      4291/nginx: worker  
+tcp6       0      0 :::80                   :::*                    LISTEN      4288/nginx: worker  
+[root@k8s02 ~]# netstat  -pntl |grep :443
+tcp        0      0 0.0.0.0:443             0.0.0.0:*               LISTEN      4291/nginx: worker  
+tcp6       0      0 :::443                  :::*                    LISTEN      4288/nginx: worker  
+其它node节点上已经启用了 80和443
+
+查看 ingress-nginx svc
+[root@k8s01 1]# kubectl get svc -n ingress-nginx
+NAME                                 TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)                      AGE
+ingress-nginx-controller             NodePort    10.97.23.124     <none>        80:30117/TCP,443:30368/TCP   11h
+ingress-nginx-controller-admission   ClusterIP   10.104.235.124   <none>        443/TCP                      11h
+
+
+创建一个简单的 svc
+
+[root@k8s01 1]# cat my-nginx.yaml 
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-nginx
+spec:
+  selector:
+    matchLabels:
+      app: my-nginx
+  template:
+    metadata:
+      labels:
+        app: my-nginx
+    spec:
+      containers:
+      - name: my-nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-nginx
+  labels:
+    app: my-nginx
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: my-nginx
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-nginx
+  namespace: default
+spec:
+  ingressClassName: nginx  # 使用 nginx 的 IngressClass（关联的 ingress-nginx 控制器）
+  rules:
+  - host: www.aorui.com  # 将域名映射到 my-nginx 服务
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:  # 将所有请求发送到 my-nginx 服务的 80 端口
+            name: my-nginx
+            port:
+              number: 80
+
+
+[root@k8s01 1]# kubectl apply -f  my-nginx.yaml 
+
+
+
+[root@k8s01 1]# curl www.aorui.com
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+html { color-scheme: light dark; }
+body { width: 35em; margin: 0 auto;
+font-family: Tahoma, Verdana, Arial, sans-serif; }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
